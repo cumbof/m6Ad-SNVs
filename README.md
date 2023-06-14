@@ -26,7 +26,6 @@ Here is the list of arguments that can also be inspected by typing `python m6A.p
 |:--------------------|:-------------|
 | `--table`           | Path to the input table with m6A sites from the RMVar database |
 | `--download`        | Automatically downlowd the m6A table from RMVar if `--table` is not specified |
-| `--co-occurrence`   | In case of multiple SNP modification occurring on the same reference sequence, consider their co-occurrence. Warning: this could lead to a combinatorial explosion |
 | `--expand-left`     | Automatically retrieve the gene sequence from NCBI Datasets and expand the reference sequence by _N_ bases to the left |
 | `--expand-right`    | Same as `--expand-left` but expands the sequence by _N_ bases to the right |
 | `--paired-unpaired` | Report the m6A sites for which the SNP modifications caused a disruption of one of the DRACH sites in the reference structure (from paired to unpaired) |
