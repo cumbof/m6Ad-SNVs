@@ -15,18 +15,20 @@ import argparse as ap
 import copy
 import errno
 import itertools
+import multiprocessing as mp
 import os
 import re
 import requests
 import subprocess
 import sys
 import tempfile
+import tqdm
 import wget
 import zipfile
+from functools import partial
 from io import StringIO
 
 from Bio import SeqIO
-from tqdm import tqdm
 
 # Tool name
 TOOL_ID = "m6A"
@@ -132,6 +134,12 @@ def read_params(argv):
         ),
     )
     p.add_argument(
+        "--nproc",
+        type=int,
+        default=1,
+        help="Make it parallel",
+    )
+    p.add_argument(
         "-v",
         "--version",
         action="version",
@@ -181,6 +189,8 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
     :param filepath:    Path to the index HTML file
     """
 
+    text = ""
+
     if header:
         header = copy.deepcopy(header)
 
@@ -189,9 +199,7 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
             header.remove(info)
 
     if init:
-        with open(filepath, "w+") as index_file:
-            index_file.write(
-                """
+        text += """
 <!DOCTYPE html>
 <html lang="en">
     <head>
@@ -209,13 +217,16 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
             <h2>Target m6A index</h2>
             <p>Click on a RMVar ID to inspect reference and alterative structures</p>
             <table class="table table-condensed table-bordered table-striped" id="myTable">
-                """
-            )
+                    """
 
-            if header:
-                index_file.write("<thead><tr><th>{}</th></tr></thead>\n".format("</th><th>".join(header)))
+        if header:
+            text += "<thead><tr><th>{}</th></tr></thead>\n".format("</th><th>".join(header))
+        
+        text += "<tbody>\n"
 
-            index_file.write("<tbody>\n")
+        if filepath:
+            with open(filepath, "w+") as index_file:
+                index_file.write(text)
 
     if row and header:
         row = copy.deepcopy(row)
@@ -227,13 +238,14 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
         if "rm_id" in row:
             row["rm_id"] = '<a href="data/{rm_id}.html" target="_blank">{rm_id}</a>'.format(rm_id=row["rm_id"])
 
-        with open(filepath, "a+") as index_file:
-            index_file.write("<tr>{}</tr>".format("".join(["<td>{}</td>".format(row[info]) for info in header])))
+        text += "<tr>{}</tr>".format("".join(["<td>{}</td>".format(row[info]) for info in header]))
+
+        if filepath:
+            with open(filepath, "a+") as index_file:
+                index_file.write(text)
 
     if close:
-        with open(filepath, "a+") as index_file:
-            index_file.write(
-                """
+        text += """
                 </tbody>
             </table>
         </div>
@@ -248,7 +260,15 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
     </body>
 </html>
                 """
-            )
+
+        if filepath:
+            with open(filepath, "a+") as index_file:
+                index_file.write(text)
+    
+    if not filepath:
+        return text
+
+    return None
 
 
 def forna_template(data=None) -> str:
@@ -263,38 +283,60 @@ def forna_template(data=None) -> str:
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <meta charset="utf-8">
         <title>RNAPlot - {rm_id}</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
         <link rel="stylesheet" href="../assets/fornac.css" />
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+        <script src="https://unpkg.com/jquery"></script>
+        <script src="https://unpkg.com/d3@3.5"></script>
+        <script src="https://unpkg.com/d3-grid"></script>
+        <script src="../assets/fornac.js"></script>
         <style>
             svg {{
                 width: 100%;
                 height: 100%;
-                max-width: 400px;
+                max-width: 600px;
                 border: 1px solid gray;
+            }}
+
+            td {{
+                padding: 0 15px;
             }}
         </style>
     </head>
     <body>
-        <div style="max-width: 800px; margin: auto;">
+        <div class="container">
             <h2>{rm_id}</h2>
+
             <div id="reference">
                 <h3>Reference</h3>
-                <p>Sequence: {reference_sequence}</p>
-                <p>Structure: {reference_structure}</p>
-                <p>Base: {reference_base}</p>
-            </div>
-            <div id="alterative">
-                <h3>Alterative</h3>
-                <p>Sequence: {alterative_sequence}</p>
-                <p>Structure: {alterative_structure}</p>
-                <p>Base: {alterative_base}</p>
+                <table>
+                    <tr>
+                        <td>Sequence</td>
+                        <td><samp>{original_reference_sequence}</samp></td>
+                    </tr>
+                    <tr>
+                        <td>Base</td>
+                        <td><samp>{reference_base}</samp></td>
+                    </tr>
+                </table>
             </div>
 
-            <script src="https://unpkg.com/jquery"></script>
-            <script src="https://unpkg.com/d3@3.5"></script>
-            <script src="https://unpkg.com/d3-grid"></script>
-            <script src="../assets/fornac.js"></script>
+            <div id="alterative">
+                <h3>Alterative</h3>
+                <table>
+                    <tr>
+                        <td>Sequence</td>
+                        <td><samp>{original_alterative_sequence}</samp></td>
+                    </tr>
+                    <tr>
+                        <td>Base</td>
+                        <td><samp>{alterative_base}</samp></td>
+                    </tr>
+                </table>
+            </div>
 
             <script type="text/javascript">
                 var reference_structure = "{reference_structure}";
@@ -309,7 +351,7 @@ def forna_template(data=None) -> str:
 
                 let reference_container = new fornac.FornaContainer(
                     "#reference",
-                    {{"animation": false, "zoomable": true, "initialSize": [300,300]}}
+                    {{"animation": false, "zoomable": true, "initialSize": [600,300]}}
                 );
 
                 reference_container.addRNA(reference_data.structure, reference_data);
@@ -327,7 +369,7 @@ def forna_template(data=None) -> str:
 
                 let alterative_container = new fornac.FornaContainer(
                     "#alterative",
-                    {{"animation": false, "zoomable": true, "initialSize": [300,300]}}
+                    {{"animation": false, "zoomable": true, "initialSize": [600,300]}}
                 );
 
                 alterative_container.addRNA(alterative_data.structure, alterative_data);
@@ -337,6 +379,351 @@ def forna_template(data=None) -> str:
     </body>
 </html>
     """
+
+
+def process_reference_sequence(
+    reference_sequence: str,
+    m6A_entries: dict,
+    out_table: str=None,
+    out_data_folder: str=None,
+    header_info: list=None,
+    expand_left: bool=False,
+    expand_right: bool=False,
+    paired_unpaired: bool=False,
+    unpaired_paired: bool=False,
+):
+    """
+    Process a group of modifications on the same reference sequence
+
+    :param reference_sequence:  The reference sequence
+    :param m6A_entries:         A dictionary with the set of RMVar IDs and their info
+    :param out_table:           Path to the output table
+    :param out_data_folder:     Path to the output structures folder
+    :param header_info:         List with header columns for both the output table and index
+    :param expand_left:         Expand the reference (and alterative) sequence N bases to the left
+    :param expand_right:        Expand the reference (and alterative) sequence N bases to the right
+    :param paired_unpaired:     Search for status change of DRACH sites (paired to unpaired)
+    :param unpaired_paired:     Search for status change of DRACH sites (unpaired to paired)
+    :return:                    The output table and index rows
+    """
+
+    out_table_rows = list()
+
+    out_index_rows = list()
+
+    has_been_expanded = False
+    expanded_left = ""
+    expanded_right = ""
+
+    if expand_left == 0 and expand_right == 0:
+        gene_reference_sequence = reference_sequence
+
+    else:
+        # Get the gene symbols
+        gene_symbols = list(set([gene for rm_id in m6A_entries for gene in m6A_entries[rm_id]["gene"] if gene.strip()]))
+
+        if not gene_symbols:
+            # Cannot retrieve the gene sequence without the gene symbol
+            gene_reference_sequence = reference_sequence
+
+        else:
+            # Retrieve the gene sequence from NCBI
+            # https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/download/gene/datasets_download_gene_symbol/
+            # Retrieve the sequences for all the involved genes with a single query
+            # Enlarge the reference and alterative sequences to N bases
+            with tempfile.NamedTemporaryFile() as genes_list, tempfile.NamedTemporaryFile() as genes_info:
+                with open(genes_list.name, "wt") as genes_list_file:
+                    for gene in gene_symbols:
+                        genes_list_file.write("{}\n".format(gene))
+
+                try:
+                    # Retrieve the gene sequence from NCBI Datasets
+                    subprocess.check_call(
+                        [
+                            "datasets",
+                            "download",
+                            "gene",
+                            "symbol",
+                            "--taxon",
+                            "human",
+                            "--include",
+                            "gene",
+                            "--no-progressbar",
+                            "--inputfile",
+                            genes_list.name,
+                            "--filename",
+                            genes_info.name
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+
+                    retrieved = True
+
+                except:
+                    # Unable to retrieve data from NCBI Datasets
+                    print("Warning: genes \"{}\" not found in NCBI Datasets".format(gene_symbols))
+
+                    retrieved = False
+
+                if retrieved:
+                    try:
+                        with zipfile.ZipFile(genes_info.name, "r") as archive:
+                            gene_stringio = StringIO(archive.read("ncbi_dataset/data/gene.fna").decode("utf-8"))
+
+                            # Load the gene sequence
+                            gene_content = SeqIO.parse(gene_stringio, "fasta")
+
+                            # Search for the reference sequence into the whole gene sequence
+                            regex = re.compile(reference_sequence.replace("_", ""))
+
+                            match_found = False
+
+                            for record in gene_content:
+                                for match in regex.finditer(str(record.seq)):
+                                    # Take track of the expanded sub sequences
+                                    expanded_left = str(record.seq)[match.start() - expand_left : match.start()]
+                                    expanded_right = str(record.seq)[match.end() : match.end() + expand_right]
+
+                                    # Expand the reference sequence
+                                    gene_reference_sequence = "{}{}{}".format(expanded_left, reference_sequence, expanded_right)
+
+                                    match_found = True
+
+                                    has_been_expanded = True
+
+                                    # There should be just one match
+                                    # If it gets here, the reference sequence exists
+                                    break
+
+                                if match_found:
+                                    break
+
+                            if not match_found:
+                                # This should never happen
+                                # There is something wrong with the sequence retrieved from NCBI Datasets
+                                # Do not expand the sequence and use the reference sequence in RMVar
+                                gene_reference_sequence = reference_sequence
+
+                            gene_stringio.close()
+
+                        not_found = False
+
+                    except:
+                        # Unable to read the zip package
+                        print("Warning: sequence not found in archive for genes \"{}\"".format(gene_symbols))
+
+                        not_found = True
+
+                if not retrieved or not_found:
+                    # It was unable to retrieve the gene sequence
+                    # Usually because of "Error: No genes found that match selection"
+                    gene_reference_sequence = reference_sequence
+
+    # Take track of RNAfold results
+    rnafold_structures = dict()
+
+    for rm_id in m6A_entries:
+        m6A_entry = m6A_entries[rm_id]
+
+        alterative_sequence = m6A_entry["alterative_sequence"]
+
+        if len(alterative_sequence) != len(gene_reference_sequence):
+            # Expand the alterative sequence
+            if expand_left > 0:
+                alterative_sequence = "{}{}".format(expanded_left, alterative_sequence)
+
+            if expand_right > 0:
+                alterative_sequence = "{}{}".format(alterative_sequence, expanded_right)
+
+        # Override original reference and alterative sequences with the expanded ones
+        # Also remove missing bases "_"
+        m6A_entry["reference_sequence"] = gene_reference_sequence.replace("_", "")
+        m6A_entry["alterative_sequence"] = alterative_sequence.replace("_", "")
+
+        rnafold_structures[rm_id] = dict()
+
+        with tempfile.NamedTemporaryFile() as rnafold_in, tempfile.NamedTemporaryFile() as rnafold_out:
+            with open(rnafold_in.name, "wt") as rnafold_in_file:
+                # Write reference sequence
+                rnafold_in_file.write(">reference_sequence\n{}\n".format(m6A_entry["reference_sequence"]))
+                # Write alterative sequence
+                rnafold_in_file.write(">alterative_sequence\n{}\n".format(m6A_entry["alterative_sequence"]))
+
+            try:
+                # Run ViennaRNA:RNAfold on reference and alterative sequence
+                subprocess.check_call(
+                    [
+                        "RNAfold",
+                        "-i",
+                        rnafold_in.name
+                    ],
+                    stdout=rnafold_out,
+                    stderr=subprocess.DEVNULL
+                )
+
+            except subprocess.CalledProcessError as e:
+                raise Exception("An error has occurred while processing {} with RNAfold".format(rm_id)).with_traceback(e.__traceback__)
+
+            # Get mfe structures in bracket notation
+            with open(rnafold_out.name, "rt") as rnafold_out_file:
+                last_seq_id = None
+
+                for line in rnafold_out_file:
+                    line = line.strip()
+
+                    if line:
+                        if line.startswith(">"):
+                            last_seq_id = line[1:]
+
+                        if line.startswith(".") or line.startswith("("):
+                            line_split = line.split(" ")
+
+                            rnafold_structures[rm_id][last_seq_id] = {
+                                "mfe_structure": line_split[0],
+                                "minimum_free_energy": line_split[-1][1:-1]  # kcal/mol
+                            }
+
+        if rnafold_structures[rm_id]:
+            reference_structure = rnafold_structures[rm_id]["reference_sequence"]["mfe_structure"]
+            alterative_structure = rnafold_structures[rm_id]["alterative_sequence"]["mfe_structure"]
+
+            if reference_structure != alterative_structure:
+                # Folded structures of reference and alterative sequences are different here for sure
+                # Check whether the alterative structure is unpaired on the DRACH site
+                regex = re.compile("[AGT][AG]AC[ACT]")
+
+                # Focus on SNPs occurring outside DRACH sites
+                at_least_one_DRACH_unpaired = False
+                at_least_one_DRACH_paired = False
+
+                # Take track of the positions of the DRACH sites in the reference and alterative sequences
+                reference_DRACH_positions = list()
+                alterative_DRACH_positions = list()
+
+                for match in regex.finditer(m6A_entry["reference_sequence"]):
+                    # We just need the start position since it is always 5 bases long
+                    reference_DRACH_positions.append(match.start() + 1)
+
+                    ref_match_pos = match.start()
+
+                    if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alterative_sequence"]):
+                        alt_match_pos = match.start()
+
+                    elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alterative_sequence"]):
+                        delta = len(m6A_entry["alterative_sequence"]) - len(m6A_entry["reference_sequence"])
+                        missing_base_pos = gene_reference_sequence.index("_")
+
+                        if match.start() > missing_base_pos:
+                            alt_match_pos = match.start() + gene_reference_sequence.count("_")
+
+                        else:
+                            alt_match_pos = match.start()
+
+                    elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alterative_sequence"]):
+                        delta = len(m6A_entry["reference_sequence"]) - len(m6A_entry["alterative_sequence"])
+                        missing_base_pos = alterative_sequence.index("_")
+
+                        if match.start() > missing_base_pos:
+                            alt_match_pos = match.start() - alterative_sequence.count("_")
+
+                        else:
+                            alt_match_pos = match.start()
+
+                    # Check whether the structure at the DRACH site on changed from paired to unpaired or the other way around
+                    # A dot in the dot-bracket notation represents an unpaired position
+                    how_many_dots_reference = reference_structure[ref_match_pos:ref_match_pos + 5].count(".")
+                    how_many_dots_alterative = alterative_structure[alt_match_pos:alt_match_pos + 5].count(".")
+
+                    if paired_unpaired:
+                        if how_many_dots_reference == 0 and how_many_dots_alterative > 0:
+                            at_least_one_DRACH_unpaired = True
+
+                    if unpaired_paired:
+                        if how_many_dots_reference > 0 and how_many_dots_alterative == 0:
+                            at_least_one_DRACH_paired = True
+
+                for match in regex.finditer(m6A_entry["alterative_sequence"]):
+                    # Also count the number of DRACH sites in the alterative sequence
+                    # We just need the start position since it is always 5 bases long
+                    alterative_DRACH_positions.append(match.start() + 1)
+
+                if at_least_one_DRACH_unpaired or at_least_one_DRACH_paired:
+                    m6A_entry["structure_state"] = "paired-unpaired" if at_least_one_DRACH_unpaired else "unpaired-paired"
+                    m6A_entry["reference_drach_sites"] = len(reference_DRACH_positions)
+                    m6A_entry["alterative_drach_sites"] = len(alterative_DRACH_positions)
+
+                    if out_table:
+                        out_table_rows.append(
+                            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                                format_m6A(rm_id=rm_id, header=header_info, data=m6A_entry),
+                                reference_structure,
+                                rnafold_structures[rm_id]["reference_sequence"]["minimum_free_energy"],
+                                alterative_structure,
+                                rnafold_structures[rm_id]["alterative_sequence"]["minimum_free_energy"],
+                                ",".join([str(drach_pos) for drach_pos in reference_DRACH_positions]),
+                                ",".join([str(drach_pos) for drach_pos in alterative_DRACH_positions])
+                            )
+                        )
+
+                    if out_data_folder:
+                        forna_filepath = os.path.join(out_data_folder, "{}.html".format(rm_id))
+
+                        with open(forna_filepath, "w+") as forna_file:
+                            # Take track of different bases positions
+                            reference_snp_positions = list()
+                            alterative_snp_positions = list()
+
+                            if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alterative_sequence"]):
+                                for pos in range(len(m6A_entry["reference_sequence"])):
+                                    if m6A_entry["reference_sequence"][pos].lower() != m6A_entry["alterative_sequence"][pos].lower():
+                                        reference_snp_positions.append(pos + 1)
+                                        alterative_snp_positions.append(pos + 1)
+
+                            elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alterative_sequence"]):
+                                missing_bases = alterative_sequence.count("_")
+                                first_missing_base_pos = alterative_sequence.index("_")
+                                reference_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases + 1)])
+
+
+                            elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alterative_sequence"]):
+                                missing_bases = gene_reference_sequence.count("_")
+                                first_missing_base_pos = gene_reference_sequence.index("_")
+                                alterative_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases + 1)])
+
+                            # Define DRACH sites colors in the reference sequence
+                            reference_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in reference_DRACH_positions])
+
+                            # Define SNPs color in the reference sequence
+                            reference_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in reference_snp_positions])
+
+                            # Define DRACH sites colors in the alterative sequence
+                            alterative_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in alterative_DRACH_positions])
+
+                            # Define SNPs color in the alterative sequence
+                            alterative_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in alterative_snp_positions])
+
+                            # Also define the html page
+                            forna_file.write(
+                                forna_template(data=m6A_entry).format(
+                                    rm_id=rm_id,
+                                    reference_structure=reference_structure,
+                                    original_reference_sequence=gene_reference_sequence,
+                                    reference_sequence=m6A_entry["reference_sequence"],
+                                    reference_base=m6A_entry["reference_base"],
+                                    reference_colors="{} {}".format(reference_drach_colors, reference_snp_colors),
+                                    alterative_structure=alterative_structure,
+                                    original_alterative_sequence=alterative_sequence,
+                                    alterative_sequence=m6A_entry["alterative_sequence"],
+                                    alterative_base=m6A_entry["alterative_base"],
+                                    alterative_colors="{} {}".format(alterative_drach_colors, alterative_snp_colors)
+                                )
+                            )
+
+                        # Add row to forna index page
+                        out_index_rows.append(forna_index(header=header_info, row=m6A_entry, filepath=None))
+
+    return out_table_rows, out_index_rows
 
 
 def main():
@@ -360,6 +747,8 @@ def main():
     else:
         if args.table and not os.path.isfile(args.table):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.table)
+
+    out_data_folder = None
 
     if args.out_structures:
         # Path to the folder with .fasta and .color files
@@ -472,9 +861,6 @@ def main():
     print("Considering {} m6A modifications over {} sequences".format(modifications_count, len(m6A_data)))
 
     if m6A_data:
-        # Take track of RNAfold results
-        rnafold_structures = dict()
-
         first_ref = list(m6A_data.keys())[0]
         first_mod = list(m6A_data[first_ref].keys())[0]
         header_info = list(m6A_data[first_ref][first_mod].keys())
@@ -499,317 +885,55 @@ def main():
             # Init target index page
             forna_index(init=True, header=header_info, filepath=out_data_index)
 
-        for reference_sequence in tqdm(m6A_data, desc="Sequences"):
-            has_been_expanded = False
-            expanded_left = ""
-            expanded_right = ""
-
-            if args.expand_left == 0 and args.expand_right == 0:
-                gene_reference_sequence = reference_sequence
-
-            else:
-                # Get the gene symbols
-                gene_symbols = list(set([gene for rm_id in m6A_data[reference_sequence] for gene in m6A_data[reference_sequence][rm_id]["gene"] if gene.strip()]))
-
-                if not gene_symbols:
-                    # Cannot retrieve the gene sequence without the gene symbol
-                    gene_reference_sequence = reference_sequence
-
-                else:
-                    # Retrieve the gene sequence from NCBI
-                    # https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/download/gene/datasets_download_gene_symbol/
-                    # Retrieve the sequences for all the involved genes with a single query
-                    # Enlarge the reference and alterative sequences to N bases
-                    with tempfile.NamedTemporaryFile() as genes_list, tempfile.NamedTemporaryFile() as genes_info:
-                        with open(genes_list.name, "wt") as genes_list_file:
-                            for gene in gene_symbols:
-                                genes_list_file.write("{}\n".format(gene))
-
-                        try:
-                            # Retrieve the gene sequence from NCBI Datasets
-                            subprocess.check_call(
-                                [
-                                    "datasets",
-                                    "download",
-                                    "gene",
-                                    "symbol",
-                                    "--taxon",
-                                    "human",
-                                    "--include",
-                                    "gene",
-                                    "--no-progressbar",
-                                    "--inputfile",
-                                    genes_list.name,
-                                    "--filename",
-                                    genes_info.name
-                                ],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL
-                            )
-
-                            retrieved = True
-
-                        except:
-                            # Unable to retrieve data from NCBI Datasets
-                            print("Warning: genes \"{}\" not found in NCBI Datasets".format(gene_symbols))
-
-                            retrieved = False
-
-                        if retrieved:
-                            try:
-                                with zipfile.ZipFile(genes_info.name, "r") as archive:
-                                    gene_stringio = StringIO(archive.read("ncbi_dataset/data/gene.fna").decode("utf-8"))
-
-                                    # Load the gene sequence
-                                    gene_content = SeqIO.parse(gene_stringio, "fasta")
-
-                                    # Search for the reference sequence into the whole gene sequence
-                                    regex = re.compile(reference_sequence.replace("_", ""))
-
-                                    match_found = False
-
-                                    for record in gene_content:
-                                        for match in regex.finditer(str(record.seq)):
-                                            # Take track of the expanded sub sequences
-                                            expanded_left = str(record.seq)[match.start() - args.expand_left : match.start()]
-                                            expanded_right = str(record.seq)[match.end() : match.end() + args.expand_right]
-
-                                            # Expand the reference sequence
-                                            gene_reference_sequence = "{}{}{}".format(expanded_left, reference_sequence, expanded_right)
-
-                                            match_found = True
-
-                                            has_been_expanded = True
-
-                                            # There should be just one match
-                                            # If it gets here, the reference sequence exists
-                                            break
-
-                                        if match_found:
-                                            break
-
-                                    if not match_found:
-                                        # This should never happen
-                                        # There is something wrong with the sequence retrieved from NCBI Datasets
-                                        # Do not expand the sequence and use the reference sequence in RMVar
-                                        gene_reference_sequence = reference_sequence
-
-                                    gene_stringio.close()
-
-                                not_found = False
-
-                            except:
-                                # Unable to read the zip package
-                                print("Warning: sequence not found in archive for genes \"{}\"".format(gene_symbols))
-
-                                not_found = True
-
-                        if not retrieved or not_found:
-                            # It was unable to retrieve the gene sequence
-                            # Usually because of "Error: No genes found that match selection"
-                            gene_reference_sequence = reference_sequence
-
-            m6A_entries = m6A_data[reference_sequence]
-
-            for rm_id in m6A_entries:
-                m6A_entry = m6A_entries[rm_id]
-
-                alterative_sequence = m6A_entry["alterative_sequence"]
-
-                if len(alterative_sequence) != len(gene_reference_sequence):
-                    # Expand the alterative sequence
-                    if args.expand_left > 0:
-                        alterative_sequence = "{}{}".format(expanded_left, alterative_sequence)
-
-                    if args.expand_right > 0:
-                        alterative_sequence = "{}{}".format(alterative_sequence, expanded_right)
-
-                # Override original reference and alterative sequences with the expanded ones
-                # Also remove missing bases "_"
-                m6A_entry["reference_sequence"] = gene_reference_sequence.replace("_", "")
-                m6A_entry["alterative_sequence"] = alterative_sequence.replace("_", "")
-
-                rnafold_structures[rm_id] = dict()
-
-                with tempfile.NamedTemporaryFile() as rnafold_in, tempfile.NamedTemporaryFile() as rnafold_out:
-                    with open(rnafold_in.name, "wt") as rnafold_in_file:
-                        # Write reference sequence
-                        rnafold_in_file.write(">reference_sequence\n{}\n".format(m6A_entry["reference_sequence"]))
-                        # Write alterative sequence
-                        rnafold_in_file.write(">alterative_sequence\n{}\n".format(m6A_entry["alterative_sequence"]))
-
-                    try:
-                        # Run ViennaRNA:RNAfold on reference and alterative sequence
-                        subprocess.check_call(
-                            [
-                                "RNAfold",
-                                "-i",
-                                rnafold_in.name
-                            ],
-                            stdout=rnafold_out,
-                            stderr=subprocess.DEVNULL
-                        )
-
-                    except subprocess.CalledProcessError as e:
-                        raise Exception("An error has occurred while processing {} with RNAfold".format(rm_id)).with_traceback(e.__traceback__)
-
-                    # Get mfe structures in bracket notation
-                    with open(rnafold_out.name, "rt") as rnafold_out_file:
-                        last_seq_id = None
-
-                        for line in rnafold_out_file:
-                            line = line.strip()
-
-                            if line:
-                                if line.startswith(">"):
-                                    last_seq_id = line[1:]
-
-                                if line.startswith(".") or line.startswith("("):
-                                    line_split = line.split(" ")
-
-                                    rnafold_structures[rm_id][last_seq_id] = {
-                                        "mfe_structure": line_split[0],
-                                        "minimum_free_energy": line_split[-1][1:-1]  # kcal/mol
-                                    }
-
-                if rnafold_structures[rm_id]:
-                    reference_structure = rnafold_structures[rm_id]["reference_sequence"]["mfe_structure"]
-                    alterative_structure = rnafold_structures[rm_id]["alterative_sequence"]["mfe_structure"]
-
-                    if reference_structure != alterative_structure:
-                        # Folded structures of reference and alterative sequences are different here for sure
-                        # Check whether the alterative structure is unpaired on the DRACH site
-                        regex = re.compile("[AGT][AG]AC[ACT]")
-
-                        # Focus on SNPs occurring outside DRACH sites
-                        at_least_one_DRACH_unpaired = False
-                        at_least_one_DRACH_paired = False
-
-                        # Take track of the positions of the DRACH sites in the reference and alterative sequences
-                        reference_DRACH_positions = list()
-                        alterative_DRACH_positions = list()
-
-                        for match in regex.finditer(m6A_entry["reference_sequence"]):
-                            # We just need the start position since it is always 5 bases long
-                            reference_DRACH_positions.append(match.start() + 1)
-
-                            ref_match_pos = match.start()
-
-                            if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alterative_sequence"]):
-                                alt_match_pos = match.start()
-
-                            elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alterative_sequence"]):
-                                delta = len(m6A_entry["alterative_sequence"]) - len(m6A_entry["reference_sequence"])
-                                missing_base_pos = gene_reference_sequence.index("_")
-
-                                if match.start() > missing_base_pos:
-                                    alt_match_pos = match.start() + gene_reference_sequence.count("_")
-
-                                else:
-                                    alt_match_pos = match.start()
-
-                            elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alterative_sequence"]):
-                                delta = len(m6A_entry["reference_sequence"]) - len(m6A_entry["alterative_sequence"])
-                                missing_base_pos = alterative_sequence.index("_")
-
-                                if match.start() > missing_base_pos:
-                                    alt_match_pos = match.start() - alterative_sequence.count("_")
-
-                                else:
-                                    alt_match_pos = match.start()
-
-                            # Check whether the structure at the DRACH site on changed from paired to unpaired or the other way around
-                            # A dot in the dot-bracket notation represents an unpaired position
-                            how_many_dots_reference = reference_structure[ref_match_pos:ref_match_pos + 5].count(".")
-                            how_many_dots_alterative = alterative_structure[alt_match_pos:alt_match_pos + 5].count(".")
-
-                            if args.paired_unpaired:
-                                if how_many_dots_reference == 0 and how_many_dots_alterative > 0:
-                                    at_least_one_DRACH_unpaired = True
-
-                            if args.unpaired_paired:
-                                if how_many_dots_reference > 0 and how_many_dots_alterative == 0:
-                                    at_least_one_DRACH_paired = True
-
-                        for match in regex.finditer(m6A_entry["alterative_sequence"]):
-                            # Also count the number of DRACH sites in the alterative sequence
-                            # We just need the start position since it is always 5 bases long
-                            alterative_DRACH_positions.append(match.start() + 1)
-
-                        if at_least_one_DRACH_unpaired or at_least_one_DRACH_paired:
-                            m6A_entry["structure_state"] = "paired-unpaired" if at_least_one_DRACH_unpaired else "unpaired-paired"
-                            m6A_entry["reference_drach_sites"] = len(reference_DRACH_positions)
-                            m6A_entry["alterative_drach_sites"] = len(alterative_DRACH_positions)
-
-                            if args.out_table:
-                                with open(args.out_table, "a+") as outfile:
-                                    outfile.write(
-                                        "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
-                                            format_m6A(rm_id=rm_id, header=header_info, data=m6A_entry),
-                                            reference_structure,
-                                            rnafold_structures[rm_id]["reference_sequence"]["minimum_free_energy"],
-                                            alterative_structure,
-                                            rnafold_structures[rm_id]["alterative_sequence"]["minimum_free_energy"],
-                                            ",".join([str(drach_pos) for drach_pos in reference_DRACH_positions]),
-                                            ",".join([str(drach_pos) for drach_pos in alterative_DRACH_positions])
-                                        )
-                                    )
-
-                            if args.out_structures:
-                                forna_filepath = os.path.join(out_data_folder, "{}.html".format(rm_id))
-
-                                with open(forna_filepath, "w+") as forna_file:
-                                    # Take track of different bases positions
-                                    reference_snp_positions = list()
-                                    alterative_snp_positions = list()
-
-                                    if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alterative_sequence"]):
-                                        for pos in range(len(m6A_entry["reference_sequence"])):
-                                            if m6A_entry["reference_sequence"][pos].lower() != m6A_entry["alterative_sequence"][pos].lower():
-                                                reference_snp_positions.append(pos + 1)
-                                                alterative_snp_positions.append(pos + 1)
-
-                                    elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alterative_sequence"]):
-                                        missing_bases = alterative_sequence.count("_")
-                                        first_missing_base_pos = alterative_sequence.index("_")
-                                        alterative_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases)])
-
-                                    elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alterative_sequence"]):
-                                        missing_bases = gene_reference_sequence.count("_")
-                                        first_missing_base_pos = gene_reference_sequence.index("_")
-                                        reference_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases)])
-
-                                    # Define DRACH sites colors in the reference sequence
-                                    reference_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in reference_DRACH_positions])
-
-                                    # Define SNPs color in the reference sequence
-                                    reference_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in reference_snp_positions])
-
-                                    # Define DRACH sites colors in the alterative sequence
-                                    alterative_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in alterative_DRACH_positions])
-
-                                    # Define SNPs color in the alterative sequence
-                                    alterative_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in alterative_snp_positions])
-
-                                    # Also define the html page
-                                    forna_file.write(
-                                        forna_template(data=m6A_entry).format(
-                                            rm_id=rm_id,
-                                            reference_structure=reference_structure,
-                                            reference_sequence=gene_reference_sequence,
-                                            reference_base=m6A_entry["reference_base"],
-                                            reference_colors="{} {}".format(reference_drach_colors, reference_snp_colors),
-                                            alterative_structure=alterative_structure,
-                                            alterative_sequence=alterative_sequence,
-                                            alterative_base=m6A_entry["alterative_base"],
-                                            alterative_colors="{} {}".format(alterative_drach_colors, alterative_snp_colors)
-                                        )
-                                    )
-
-                                # Add row to forna index page
-                                forna_index(header=header_info, row=m6A_entry, filepath=out_data_index)
+        process_reference_sequence_partial = partial(
+            process_reference_sequence,
+            out_table=args.out_table,
+            out_data_folder=out_data_folder,
+            header_info=header_info,
+            expand_left=args.expand_left,
+            expand_right=args.expand_right,
+            paired_unpaired=args.paired_unpaired,
+            unpaired_paired=args.unpaired_paired,
+            
+        )
+
+        out_table_rows = list()
+
+        out_index_rows = list()
+
+        # Run prediction on folds in parallel
+        with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(m6A_data)) as pbar:
+            # Wrapper around the update function of tqdm
+            def progress(*args):
+                pbar.update()
+
+            jobs = [
+                pool.apply_async(
+                    process_reference_sequence_partial,
+                    args=(reference_sequence, m6A_data[reference_sequence],),
+                    callback=progress,
+                )
+                for reference_sequence in m6A_data
+            ]
+
+            # Get results from jobs
+            for job in jobs:
+                partial_out_table_rows, partial_out_index_rows = job.get()
+
+                out_table_rows.extend(partial_out_table_rows)
+                out_index_rows.extend(partial_out_index_rows)
+
+        if args.out_table and out_table_rows:
+            for row in out_table_rows:
+                with open(args.out_table, "a+") as outfile:
+                    outfile.write(row)
 
         if args.out_structures:
+            if out_index_rows:
+                for row in out_index_rows:
+                    with open(out_data_index, "a+") as index_file:
+                        index_file.write("{}\n".format(row))
+
             # Finalize forna index page
             forna_index(close=True, filepath=out_data_index)
 
