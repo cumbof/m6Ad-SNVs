@@ -102,7 +102,7 @@ def read_params(argv):
         dest="paired_unpaired",
         help=(
             "Report a RMVar ID if at least one paired DRACH site in the reference structure "
-            "become unpaired in the alterative structure"
+            "become unpaired in the alternate structure"
         ),
     )
     p.add_argument(
@@ -112,7 +112,7 @@ def read_params(argv):
         dest="unpaired_paired",
         help=(
             "Report a RMVar ID if at least one unpaired DRACH site in the reference structure "
-            "become paired in the alterative structure"
+            "become paired in the alternate structure"
         ),
     )
     p.add_argument(
@@ -127,7 +127,7 @@ def read_params(argv):
         dest="out_structures",
         help=(
             "Path to the output folder with RNAfold structures (optional, it overwrites the output files if they exist). "
-            "In order to visualize the secondary structures of both the reference and alterative sequences, "
+            "In order to visualize the secondary structures of both the reference and alternate sequences, "
             "go to http://rna.tbi.univie.ac.at/forna/, click on \"Add Sequence and Secondary Structure\" and "
             "paste the content of a .fasta file, then click on \"Colors -> Custom\" and paste the content of "
             "the corresponding .color file. PNG figures are also produced."
@@ -195,7 +195,7 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
         header = copy.deepcopy(header)
 
         # Remove info
-        for info in ("reference_sequence", "reference_base", "alterative_sequence", "alterative_base"):
+        for info in ("reference_sequence", "reference_base", "alternate_sequence", "alternate_base"):
             header.remove(info)
 
     if init:
@@ -215,7 +215,7 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
     <body>
         <div class="container">
             <h2>Target m6A index</h2>
-            <p>Click on a RMVar ID to inspect reference and alterative structures</p>
+            <p>Click on a RMVar ID to inspect reference and alternate structures</p>
             <table class="table table-condensed table-bordered table-striped" id="myTable">
                     """
 
@@ -232,7 +232,7 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
         row = copy.deepcopy(row)
 
         # Remove info
-        for info in ("reference_sequence", "reference_base", "alterative_sequence", "alterative_base"):
+        for info in ("reference_sequence", "reference_base", "alternate_sequence", "alternate_base"):
             del row[info]
 
         if "rm_id" in row:
@@ -317,23 +317,15 @@ def forna_template(data=None) -> str:
                         <td>Sequence</td>
                         <td><samp>{original_reference_sequence}</samp></td>
                     </tr>
-                    <tr>
-                        <td>Base</td>
-                        <td><samp>{reference_base}</samp></td>
-                    </tr>
                 </table>
             </div>
 
-            <div id="alterative">
-                <h3>Alterative</h3>
+            <div id="alternate">
+                <h3>Alternate</h3>
                 <table>
                     <tr>
                         <td>Sequence</td>
-                        <td><samp>{original_alterative_sequence}</samp></td>
-                    </tr>
-                    <tr>
-                        <td>Base</td>
-                        <td><samp>{alterative_base}</samp></td>
+                        <td><samp>{original_alternate_sequence}</samp></td>
                     </tr>
                 </table>
             </div>
@@ -357,23 +349,23 @@ def forna_template(data=None) -> str:
                 reference_container.addRNA(reference_data.structure, reference_data);
                 reference_container.addCustomColorsText(reference_colors);
 
-                var alterative_structure = "{alterative_structure}";
-                var alterative_sequence = "{alterative_sequence}";
-                var alterative_colors = "{alterative_colors}";
+                var alternate_structure = "{alternate_structure}";
+                var alternate_sequence = "{alternate_sequence}";
+                var alternate_colors = "{alternate_colors}";
 
-                var alterative_data = {{
-                    "structure": alterative_structure,
-                    "sequence": alterative_sequence,
-                    "name": "Alterative"
+                var alternate_data = {{
+                    "structure": alternate_structure,
+                    "sequence": alternate_sequence,
+                    "name": "Alternate"
                 }};
 
-                let alterative_container = new fornac.FornaContainer(
-                    "#alterative",
+                let alternate_container = new fornac.FornaContainer(
+                    "#alternate",
                     {{"animation": false, "zoomable": true, "initialSize": [600,300]}}
                 );
 
-                alterative_container.addRNA(alterative_data.structure, alterative_data);
-                alterative_container.addCustomColorsText(alterative_colors);
+                alternate_container.addRNA(alternate_data.structure, alternate_data);
+                alternate_container.addCustomColorsText(alternate_colors);
             </script>
         </div>
     </body>
@@ -400,8 +392,8 @@ def process_reference_sequence(
     :param out_table:           Path to the output table
     :param out_data_folder:     Path to the output structures folder
     :param header_info:         List with header columns for both the output table and index
-    :param expand_left:         Expand the reference (and alterative) sequence N bases to the left
-    :param expand_right:        Expand the reference (and alterative) sequence N bases to the right
+    :param expand_left:         Expand the reference (and alternate) sequence N bases to the left
+    :param expand_right:        Expand the reference (and alternate) sequence N bases to the right
     :param paired_unpaired:     Search for status change of DRACH sites (paired to unpaired)
     :param unpaired_paired:     Search for status change of DRACH sites (unpaired to paired)
     :return:                    The output table and index rows
@@ -430,7 +422,7 @@ def process_reference_sequence(
             # Retrieve the gene sequence from NCBI
             # https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/download/gene/datasets_download_gene_symbol/
             # Retrieve the sequences for all the involved genes with a single query
-            # Enlarge the reference and alterative sequences to N bases
+            # Enlarge the reference and alternate sequences to N bases
             with tempfile.NamedTemporaryFile() as genes_list, tempfile.NamedTemporaryFile() as genes_info:
                 with open(genes_list.name, "wt") as genes_list_file:
                     for gene in gene_symbols:
@@ -526,20 +518,20 @@ def process_reference_sequence(
     for rm_id in m6A_entries:
         m6A_entry = m6A_entries[rm_id]
 
-        alterative_sequence = m6A_entry["alterative_sequence"]
+        alternate_sequence = m6A_entry["alternate_sequence"]
 
-        if len(alterative_sequence) != len(gene_reference_sequence):
-            # Expand the alterative sequence
+        if len(alternate_sequence) != len(gene_reference_sequence):
+            # Expand the alternate sequence
             if expand_left > 0:
-                alterative_sequence = "{}{}".format(expanded_left, alterative_sequence)
+                alternate_sequence = "{}{}".format(expanded_left, alternate_sequence)
 
             if expand_right > 0:
-                alterative_sequence = "{}{}".format(alterative_sequence, expanded_right)
+                alternate_sequence = "{}{}".format(alternate_sequence, expanded_right)
 
-        # Override original reference and alterative sequences with the expanded ones
+        # Override original reference and alternate sequences with the expanded ones
         # Also remove missing bases "_"
         m6A_entry["reference_sequence"] = gene_reference_sequence.replace("_", "")
-        m6A_entry["alterative_sequence"] = alterative_sequence.replace("_", "")
+        m6A_entry["alternate_sequence"] = alternate_sequence.replace("_", "")
 
         rnafold_structures[rm_id] = dict()
 
@@ -547,11 +539,11 @@ def process_reference_sequence(
             with open(rnafold_in.name, "wt") as rnafold_in_file:
                 # Write reference sequence
                 rnafold_in_file.write(">reference_sequence\n{}\n".format(m6A_entry["reference_sequence"]))
-                # Write alterative sequence
-                rnafold_in_file.write(">alterative_sequence\n{}\n".format(m6A_entry["alterative_sequence"]))
+                # Write alternate sequence
+                rnafold_in_file.write(">alternate_sequence\n{}\n".format(m6A_entry["alternate_sequence"]))
 
             try:
-                # Run ViennaRNA:RNAfold on reference and alterative sequence
+                # Run ViennaRNA:RNAfold on reference and alternate sequence
                 subprocess.check_call(
                     [
                         "RNAfold",
@@ -586,20 +578,20 @@ def process_reference_sequence(
 
         if rnafold_structures[rm_id]:
             reference_structure = rnafold_structures[rm_id]["reference_sequence"]["mfe_structure"]
-            alterative_structure = rnafold_structures[rm_id]["alterative_sequence"]["mfe_structure"]
+            alternate_structure = rnafold_structures[rm_id]["alternate_sequence"]["mfe_structure"]
 
-            if reference_structure != alterative_structure:
-                # Folded structures of reference and alterative sequences are different here for sure
-                # Check whether the alterative structure is unpaired on the DRACH site
+            if reference_structure != alternate_structure:
+                # Folded structures of reference and alternate sequences are different here for sure
+                # Check whether the alternate structure is unpaired on the DRACH site
                 regex = re.compile("[AGT][AG]AC[ACT]")
 
                 # Focus on SNPs occurring outside DRACH sites
                 at_least_one_DRACH_unpaired = False
                 at_least_one_DRACH_paired = False
 
-                # Take track of the positions of the DRACH sites in the reference and alterative sequences
+                # Take track of the positions of the DRACH sites in the reference and alternate sequences
                 reference_DRACH_positions = list()
-                alterative_DRACH_positions = list()
+                alternate_DRACH_positions = list()
 
                 for match in regex.finditer(m6A_entry["reference_sequence"]):
                     # We just need the start position since it is always 5 bases long
@@ -607,11 +599,11 @@ def process_reference_sequence(
 
                     ref_match_pos = match.start()
 
-                    if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alterative_sequence"]):
+                    if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alternate_sequence"]):
                         alt_match_pos = match.start()
 
-                    elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alterative_sequence"]):
-                        delta = len(m6A_entry["alterative_sequence"]) - len(m6A_entry["reference_sequence"])
+                    elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alternate_sequence"]):
+                        delta = len(m6A_entry["alternate_sequence"]) - len(m6A_entry["reference_sequence"])
                         missing_base_pos = gene_reference_sequence.index("_")
 
                         if match.start() > missing_base_pos:
@@ -620,12 +612,12 @@ def process_reference_sequence(
                         else:
                             alt_match_pos = match.start()
 
-                    elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alterative_sequence"]):
-                        delta = len(m6A_entry["reference_sequence"]) - len(m6A_entry["alterative_sequence"])
-                        missing_base_pos = alterative_sequence.index("_")
+                    elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alternate_sequence"]):
+                        delta = len(m6A_entry["reference_sequence"]) - len(m6A_entry["alternate_sequence"])
+                        missing_base_pos = alternate_sequence.index("_")
 
                         if match.start() > missing_base_pos:
-                            alt_match_pos = match.start() - alterative_sequence.count("_")
+                            alt_match_pos = match.start() - alternate_sequence.count("_")
 
                         else:
                             alt_match_pos = match.start()
@@ -633,25 +625,25 @@ def process_reference_sequence(
                     # Check whether the structure at the DRACH site on changed from paired to unpaired or the other way around
                     # A dot in the dot-bracket notation represents an unpaired position
                     how_many_dots_reference = reference_structure[ref_match_pos:ref_match_pos + 5].count(".")
-                    how_many_dots_alterative = alterative_structure[alt_match_pos:alt_match_pos + 5].count(".")
+                    how_many_dots_alternate = alternate_structure[alt_match_pos:alt_match_pos + 5].count(".")
 
                     if paired_unpaired:
-                        if how_many_dots_reference == 0 and how_many_dots_alterative > 0:
+                        if how_many_dots_reference == 0 and how_many_dots_alternate > 0:
                             at_least_one_DRACH_unpaired = True
 
                     if unpaired_paired:
-                        if how_many_dots_reference > 0 and how_many_dots_alterative == 0:
+                        if how_many_dots_reference > 0 and how_many_dots_alternate == 0:
                             at_least_one_DRACH_paired = True
 
-                for match in regex.finditer(m6A_entry["alterative_sequence"]):
-                    # Also count the number of DRACH sites in the alterative sequence
+                for match in regex.finditer(m6A_entry["alternate_sequence"]):
+                    # Also count the number of DRACH sites in the alternate sequence
                     # We just need the start position since it is always 5 bases long
-                    alterative_DRACH_positions.append(match.start() + 1)
+                    alternate_DRACH_positions.append(match.start() + 1)
 
                 if at_least_one_DRACH_unpaired or at_least_one_DRACH_paired:
                     m6A_entry["structure_state"] = "paired-unpaired" if at_least_one_DRACH_unpaired else "unpaired-paired"
                     m6A_entry["reference_drach_sites"] = len(reference_DRACH_positions)
-                    m6A_entry["alterative_drach_sites"] = len(alterative_DRACH_positions)
+                    m6A_entry["alternate_drach_sites"] = len(alternate_DRACH_positions)
 
                     if out_table:
                         out_table_rows.append(
@@ -659,10 +651,10 @@ def process_reference_sequence(
                                 format_m6A(rm_id=rm_id, header=header_info, data=m6A_entry),
                                 reference_structure,
                                 rnafold_structures[rm_id]["reference_sequence"]["minimum_free_energy"],
-                                alterative_structure,
-                                rnafold_structures[rm_id]["alterative_sequence"]["minimum_free_energy"],
+                                alternate_structure,
+                                rnafold_structures[rm_id]["alternate_sequence"]["minimum_free_energy"],
                                 ",".join([str(drach_pos) for drach_pos in reference_DRACH_positions]),
-                                ",".join([str(drach_pos) for drach_pos in alterative_DRACH_positions])
+                                ",".join([str(drach_pos) for drach_pos in alternate_DRACH_positions])
                             )
                         )
 
@@ -672,24 +664,27 @@ def process_reference_sequence(
                         with open(forna_filepath, "w+") as forna_file:
                             # Take track of different bases positions
                             reference_snp_positions = list()
-                            alterative_snp_positions = list()
+                            alternate_snp_positions = list()
 
-                            if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alterative_sequence"]):
+                            if len(m6A_entry["reference_sequence"]) == len(m6A_entry["alternate_sequence"]):
                                 for pos in range(len(m6A_entry["reference_sequence"])):
-                                    if m6A_entry["reference_sequence"][pos].lower() != m6A_entry["alterative_sequence"][pos].lower():
+                                    if m6A_entry["reference_sequence"][pos].lower() != m6A_entry["alternate_sequence"][pos].lower():
                                         reference_snp_positions.append(pos + 1)
-                                        alterative_snp_positions.append(pos + 1)
+                                        alternate_snp_positions.append(pos + 1)
 
-                            elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alterative_sequence"]):
-                                missing_bases = alterative_sequence.count("_")
-                                first_missing_base_pos = alterative_sequence.index("_")
+                            elif len(m6A_entry["reference_sequence"]) > len(m6A_entry["alternate_sequence"]):
+                                missing_bases = alternate_sequence.count("_")
+                                first_missing_base_pos = alternate_sequence.index("_")
                                 reference_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases + 1)])
 
+                                alternate_snp_positions.append(first_missing_base_pos)
 
-                            elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alterative_sequence"]):
+                            elif len(m6A_entry["reference_sequence"]) < len(m6A_entry["alternate_sequence"]):
                                 missing_bases = gene_reference_sequence.count("_")
                                 first_missing_base_pos = gene_reference_sequence.index("_")
-                                alterative_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases + 1)])
+                                alternate_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases + 1)])
+
+                                reference_snp_positions.append(first_missing_base_pos)
 
                             # Define DRACH sites colors in the reference sequence
                             reference_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in reference_DRACH_positions])
@@ -697,11 +692,11 @@ def process_reference_sequence(
                             # Define SNPs color in the reference sequence
                             reference_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in reference_snp_positions])
 
-                            # Define DRACH sites colors in the alterative sequence
-                            alterative_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in alterative_DRACH_positions])
+                            # Define DRACH sites colors in the alternate sequence
+                            alternate_drach_colors = " ".join(["{}-{}:green".format(drach_pos, drach_pos + 4) for drach_pos in alternate_DRACH_positions])
 
-                            # Define SNPs color in the alterative sequence
-                            alterative_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in alterative_snp_positions])
+                            # Define SNPs color in the alternate sequence
+                            alternate_snp_colors = " ".join(["{}:orange".format(snp_pos) for snp_pos in alternate_snp_positions])
 
                             # Also define the html page
                             forna_file.write(
@@ -710,13 +705,11 @@ def process_reference_sequence(
                                     reference_structure=reference_structure,
                                     original_reference_sequence=gene_reference_sequence,
                                     reference_sequence=m6A_entry["reference_sequence"],
-                                    reference_base=m6A_entry["reference_base"],
                                     reference_colors="{} {}".format(reference_drach_colors, reference_snp_colors),
-                                    alterative_structure=alterative_structure,
-                                    original_alterative_sequence=alterative_sequence,
-                                    alterative_sequence=m6A_entry["alterative_sequence"],
-                                    alterative_base=m6A_entry["alterative_base"],
-                                    alterative_colors="{} {}".format(alterative_drach_colors, alterative_snp_colors)
+                                    alternate_structure=alternate_structure,
+                                    original_alternate_sequence=alternate_sequence,
+                                    alternate_sequence=m6A_entry["alternate_sequence"],
+                                    alternate_colors="{} {}".format(alternate_drach_colors, alternate_snp_colors)
                                 )
                             )
 
@@ -805,53 +798,79 @@ def main():
 
                     if process_m6A:
                         reference_sequence = line_split[header.index("reference_sequence")]
-                        alterative_sequence = line_split[header.index("alterative_sequence")]
+                        alternate_sequence = line_split[header.index("alterative_sequence")]
 
-                        if len(reference_sequence) + args.expand_left + args.expand_right > 1023:
+                        max_ref_seq_len = len(reference_sequence.replace("_", "")) + args.expand_left + args.expand_right
+                        max_alt_seq_len = len(alternate_sequence.replace("_", "")) + args.expand_left + args.expand_right
+
+                        max_seq_len = max_ref_seq_len if max_ref_seq_len > max_alt_seq_len else max_alt_seq_len
+
+                        if max_seq_len > 1023:
                             raise Exception(
                                 "Sequence length cannot exceed 1023 bases due to ViennaRNA:RNAfold limitation. "
-                                "Reference and alterative sequence length in RMVar table is {}. "
-                                "Please reduce --expand-left and --expand-right accordingly".format(len(reference_sequence))
+                                "Sequence length in RMVar table is {}. "
+                                "Please reduce --expand-left and --expand-right accordingly".format(max_seq_len)
                             )
 
                         # Search for DRACH sites
                         # DRACH regex involving 5 positions only: [AGU][AG]AC[ACU]
-                        regex = re.compile("[AGT][AG]AC[ACT]")
+                        regex = "[AGT][AG]AC[ACT]"
 
                         # Focus on SNPs occurring outside the DRACH sites
                         snp_in_DRACH = False
 
-                        for match in regex.finditer(reference_sequence):
-                            # Check whether the alterative base occurs in a DRACH site
-                            if reference_sequence[match.start():match.start() + 5] != alterative_sequence[match.start():match.start() + 5]:
-                                snp_in_DRACH = True
+                        for pos in range(len(reference_sequence)):
+                            if pos + 5 == len(reference_sequence):
+                                break
+
+                            ref_window = reference_sequence[pos: pos + 5]
+                            alt_window = alternate_sequence[pos: pos + 5]
+
+                            if re.match(regex, ref_window):
+                                if "_" in alt_window:
+                                    snp_in_DRACH = True
+
+                                elif ref_window != alt_window:
+                                    snp_in_DRACH = True
+
+                            elif "_" in ref_window:
+                                # Expand window
+                                count_missing_bases = reference_sequence.count("_")
+
+                                ref_window = reference_sequence[pos: pos + 5 + count_missing_bases].replace("_", "")[:5]
+
+                                if re.match(regex, ref_window):
+                                    snp_in_DRACH = True
+
+                            if snp_in_DRACH:
+                                break
 
                         if not snp_in_DRACH:
                             if reference_sequence not in m6A_data:
                                 m6A_data[reference_sequence] = dict()
 
                             m6A_data[reference_sequence][line_split[header.index("rm_id")]] = {
-                                    "rm_id": line_split[header.index("rm_id")],
-                                    "chromosome": line_split[header.index("chromosome")],
-                                    "strand": line_split[header.index("strand")],
-                                    "position": line_split[header.index("position")],
-                                    "snp_start": line_split[header.index("snp_start")],
-                                    "snp_end": line_split[header.index("snp_end")],
-                                    "reference_sequence": reference_sequence,
-                                    "alterative_sequence": alterative_sequence,
-                                    "reference_base": line_split[header.index("reference_base")],
-                                    "alterative_base": line_split[header.index("alterative_base")],
-                                    "gene": line_split[header.index("gene")].split(","),
-                                    "gene_database_id": {
-                                        value.split(":")[0]: value.split(":")[1] for value in line_split[header.index("gene_database_id")].split(",")
-                                    },
-                                    "gene_type": line_split[header.index("gene_type")].split(","),
-                                    "gene_region": line_split[header.index("gene_region")].split(","),
-                                    "tumor": line_split[header.index("tumor")].split(","),
-                                    "structure_state": "",
-                                    "reference_drach_sites": 0,
-                                    "alterative_drach_sites": 0
-                                }
+                                "rm_id": line_split[header.index("rm_id")],
+                                "chromosome": line_split[header.index("chromosome")],
+                                "strand": line_split[header.index("strand")],
+                                "position": line_split[header.index("position")],
+                                "snp_start": line_split[header.index("snp_start")],
+                                "snp_end": line_split[header.index("snp_end")],
+                                "reference_sequence": reference_sequence,
+                                "alternate_sequence": alternate_sequence,
+                                "reference_base": line_split[header.index("reference_base")],
+                                "alternate_base": line_split[header.index("alterative_base")],
+                                "gene": line_split[header.index("gene")].split(","),
+                                "gene_database_id": {
+                                    value.split(":")[0]: value.split(":")[1] for value in line_split[header.index("gene_database_id")].split(",")
+                                },
+                                "gene_type": line_split[header.index("gene_type")].split(","),
+                                "gene_region": line_split[header.index("gene_region")].split(","),
+                                "tumor": line_split[header.index("tumor")].split(","),
+                                "structure_state": "",
+                                "reference_drach_sites": 0,
+                                "alternate_drach_sites": 0
+                            }
 
                             modifications_count += 1
 
@@ -872,10 +891,10 @@ def main():
                         format_m6A(header=header_info),
                         "rnafold_reference_mfe_structure",
                         "rnafold_reference_minimum_free_energy",
-                        "rnafold_alterative_mfe_structure",
-                        "rnafold_alterative_minimum_free_energy",
+                        "rnafold_alternate_mfe_structure",
+                        "rnafold_alternate_minimum_free_energy",
                         "relative_reference_drach_positions",
-                        "relative_alterative_drach_positions"
+                        "relative_alternate_drach_positions"
                     )
                 )
 
