@@ -317,6 +317,10 @@ def forna_template(data=None) -> str:
                         <td>Sequence</td>
                         <td><samp>{original_reference_sequence}</samp></td>
                     </tr>
+                    <tr>
+                        <td>Base</td>
+                        <td><samp>{reference_base}</samp></td>
+                    </tr>
                 </table>
             </div>
 
@@ -326,6 +330,10 @@ def forna_template(data=None) -> str:
                     <tr>
                         <td>Sequence</td>
                         <td><samp>{original_alternate_sequence}</samp></td>
+                    </tr>
+                    <tr>
+                        <td>Base</td>
+                        <td><samp>{alternate_base}</samp></td>
                     </tr>
                 </table>
             </div>
@@ -705,10 +713,12 @@ def process_reference_sequence(
                                     reference_structure=reference_structure,
                                     original_reference_sequence=gene_reference_sequence,
                                     reference_sequence=m6A_entry["reference_sequence"],
+                                    reference_base="".join([m6A_entry["reference_sequence"][pos - 1] for pos in reference_snp_positions]),
                                     reference_colors="{} {}".format(reference_drach_colors, reference_snp_colors),
                                     alternate_structure=alternate_structure,
                                     original_alternate_sequence=alternate_sequence,
                                     alternate_sequence=m6A_entry["alternate_sequence"],
+                                    alternate_base="".join([m6A_entry["alternate_sequence"][pos - 1] for pos in alternate_snp_positions]),
                                     alternate_colors="{} {}".format(alternate_drach_colors, alternate_snp_colors)
                                 )
                             )
