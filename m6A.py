@@ -82,6 +82,15 @@ def read_params(argv):
         help="Download the RMVar table into the working directory",
     )
     p.add_argument(
+        "--expand",
+        action="store_true",
+        default=False,
+        help=(
+            "Expand the reference sequence to the whole gene. "
+            "It overrides --expand-left and --expand-right"
+        ),
+    )
+    p.add_argument(
         "--expand-left",
         type=int,
         default=0,
@@ -387,10 +396,12 @@ def process_reference_sequence(
     out_table: str=None,
     out_data_folder: str=None,
     header_info: list=None,
-    expand_left: bool=False,
-    expand_right: bool=False,
+    expand: bool=False,
+    expand_left: int=0,
+    expand_right: int=0,
     paired_unpaired: bool=False,
     unpaired_paired: bool=False,
+    verbose: bool=True
 ):
     """
     Process a group of modifications on the same reference sequence
@@ -400,6 +411,7 @@ def process_reference_sequence(
     :param out_table:           Path to the output table
     :param out_data_folder:     Path to the output structures folder
     :param header_info:         List with header columns for both the output table and index
+    :param expand:              Expand the reference (and alternate) sequence to the whole gene. It overrides expand_left and expand_right
     :param expand_left:         Expand the reference (and alternate) sequence N bases to the left
     :param expand_right:        Expand the reference (and alternate) sequence N bases to the right
     :param paired_unpaired:     Search for status change of DRACH sites (paired to unpaired)
@@ -415,7 +427,7 @@ def process_reference_sequence(
     expanded_left = ""
     expanded_right = ""
 
-    if expand_left == 0 and expand_right == 0:
+    if not expand and expand_left == 0 and expand_right == 0:
         gene_reference_sequence = reference_sequence
 
     else:
@@ -461,8 +473,9 @@ def process_reference_sequence(
                     retrieved = True
 
                 except:
-                    # Unable to retrieve data from NCBI Datasets
-                    print("Warning: genes \"{}\" not found in NCBI Datasets".format(gene_symbols))
+                    if verbose:
+                        # Unable to retrieve data from NCBI Datasets
+                        print("Warning: genes \"{}\" not found in NCBI Datasets".format(gene_symbols))
 
                     retrieved = False
 
@@ -481,6 +494,11 @@ def process_reference_sequence(
 
                             for record in gene_content:
                                 for match in regex.finditer(str(record.seq)):
+                                    if expand:
+                                        # Expand the reference sequence to the whole gene
+                                        expand_left = match.start()
+                                        expand_right = len(str(record.seq)) - match.end()
+
                                     # Take track of the expanded sub sequences
                                     expanded_left = str(record.seq)[match.start() - expand_left : match.start()]
                                     expanded_right = str(record.seq)[match.end() : match.end() + expand_right]
@@ -510,8 +528,9 @@ def process_reference_sequence(
                         not_found = False
 
                     except:
-                        # Unable to read the zip package
-                        print("Warning: sequence not found in archive for genes \"{}\"".format(gene_symbols))
+                        if verbose:
+                            # Unable to read the zip package
+                            print("Warning: sequence not found in archive for genes \"{}\"".format(gene_symbols))
 
                         not_found = True
 
@@ -810,18 +829,6 @@ def main():
                         reference_sequence = line_split[header.index("reference_sequence")]
                         alternate_sequence = line_split[header.index("alterative_sequence")]
 
-                        max_ref_seq_len = len(reference_sequence.replace("_", "")) + args.expand_left + args.expand_right
-                        max_alt_seq_len = len(alternate_sequence.replace("_", "")) + args.expand_left + args.expand_right
-
-                        max_seq_len = max_ref_seq_len if max_ref_seq_len > max_alt_seq_len else max_alt_seq_len
-
-                        if max_seq_len > 1023:
-                            raise Exception(
-                                "Sequence length cannot exceed 1023 bases due to ViennaRNA:RNAfold limitation. "
-                                "Sequence length in RMVar table is {}. "
-                                "Please reduce --expand-left and --expand-right accordingly".format(max_seq_len)
-                            )
-
                         # Search for DRACH sites
                         # DRACH regex involving 5 positions only: [AGU][AG]AC[ACU]
                         regex = "[AGT][AG]AC[ACT]"
@@ -919,11 +926,12 @@ def main():
             out_table=args.out_table,
             out_data_folder=out_data_folder,
             header_info=header_info,
+            expand=args.expand,
             expand_left=args.expand_left,
             expand_right=args.expand_right,
             paired_unpaired=args.paired_unpaired,
             unpaired_paired=args.unpaired_paired,
-            
+            verbose=False
         )
 
         out_table_rows = list()
