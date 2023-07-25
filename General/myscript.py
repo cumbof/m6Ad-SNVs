@@ -49,7 +49,8 @@ TABLE_COLS = [
     "start",
     "end",
     "strand",
-    "name",
+    "gene_symbol",
+    "transcript_id",
     "reference_sequence",
     "reference_structure",  # MFE structure in dot-bracket notation as reported by RNAfold
     "reference_minimum_free_energy",  # In kcal/mol as reported by RNAfold
@@ -115,26 +116,6 @@ def read_params(argv):
         help=(
             "Search for a specific pattern in the sequences. "
             "It accepts regular expressions. It searches for DRACH sites by default"
-        ),
-    )
-    p.add_argument(
-        "--expand-left",
-        type=int,
-        default=0,
-        dest="expand_left",
-        help=(
-            "Expand the sequences of N bases to the left. "
-            "Use the offsets of the genomic regions in the BED file by default"
-        ),
-    )
-    p.add_argument(
-        "--expand-right",
-        type=int,
-        default=0,
-        dest="expand_right",
-        help=(
-            "Expand the sequences of N bases to the right. "
-            "Use the offsets of the genomic regions in the BED file by default"
         ),
     )
     p.add_argument(
@@ -488,8 +469,6 @@ def process_vcf_entry(
     bed_entry,
     vcf_entry,
     search_for="[AGT][AG]AC[ACT]",
-    expand_left=0,
-    expand_right=0,
     out_table=None,
     out_data_folder=None
 ):
@@ -502,8 +481,6 @@ def process_vcf_entry(
     :param bed_entry:           Genomic coordinates of a specific region
     :param vcf_entry:           VCF entry
     :param search_for:          Regex (must be of a fixed length)
-    :param expand_left:         Expand the reference (and the alternate) sequence of N bases to the left
-    :param expand_right:        Expand the reference (and the alternate) sequence of N bases to the right
     :param out_table:           Path to the output table
     :param out_data_folder:     Path to the output folder with the HTML index
     """
@@ -689,13 +666,6 @@ def process_vcf_entry(
                 reference_pattern_sites = len(reference_pattern_positions)
                 alternate_pattern_sites = len(alternate_pattern_positions)
 
-                start_pos = bed_entry["start"] if expand_left == 0 else vcf_entry["pos"] - expand_left
-
-                if start_pos < 0:
-                    start_pos = 0
-
-                end_pos = bed_entry["end"] if expand_right == 0 else vcf_entry["pos"] + expand_right
-
                 # Take track of different bases positions
                 reference_snp_positions = list()
                 alternate_snp_positions = list()
@@ -730,10 +700,11 @@ def process_vcf_entry(
                 out_table_row = [
                     vcf_entry_id,
                     bed_entry["chromosome"],
-                    start_pos,
-                    end_pos,
+                    bed_entry["start"],
+                    bed_entry["end"],
                     bed_entry["strand"],
-                    bed_entry["name"],
+                    bed_entry["gene_symbol"],
+                    bed_entry["transcript_id"],
                     reference_no_missing_bases,
                     reference_structure,
                     round(reference_min_free_energy, 4),
@@ -860,8 +831,6 @@ def main():
     process_vcf_entry_partial = partial(
         process_vcf_entry,
         search_for=args.search,
-        expand_left=args.expand_left,
-        expand_right=args.expand_right,
         out_table=args.out_table,
         out_data_folder=out_data_folder
     )
@@ -908,17 +877,6 @@ def main():
                         region_start = row["start"]
                         region_end = row["end"]
 
-                        if args.expand_left > 0:
-                            # Expand the sequence N bases to the left
-                            region_start = entry.pos - 1 - args.expand_left
-
-                            if region_start < 0:
-                                region_start = 0
-
-                        if args.expand_right > 0:
-                            # Expand the sequence N bases to the right
-                            region_end = entry.pos - 1 + args.expand_right
-
                         # In case of indels only
                         indel_len = max(len(ref), len(alt))
 
@@ -929,6 +887,9 @@ def main():
                                 region_end = new_region_end
 
                         # Retrieve the sequence from the input genome
+                        # Within pysam, coordinates are 0-based half-open intervals
+                        # i.e., the first base of the reference sequence is numbered zero;
+                        # and the base at position start is part of the interval, but the base at end is not.
                         reference_sequence = genome.fetch("chr{}".format(entry.chrom), region_start - 1, region_end).upper()
 
                         # Check whether the REF base in the VCF entry actually matches with the base in the reference sequence under that specific position
@@ -999,34 +960,65 @@ def main():
                                     alternate_sequence[entry.pos - region_start + len(alt):]
                                 )
 
+                        transcript_id = row["name"].split("__")[0]
+
+                        # Retrieve all the genomic regions in the BED file corresponding to the current transcript ID
+                        transcript_regions = bed.loc[bed["name"].str.startswith("{}__".format(transcript_id))]
+                        
+                        # Sort regions based on the start position in ascending order
+                        transcript_regions.sort_values(by="start", ascending=True, inplace=True)
+
+                        merged_reference_sequence = ""
+                        merged_alternate_sequence = ""
+
+                        absolute_start = -1
+                        absolute_end = -1
+
+                        for _, transcript_row in transcript_regions.iterrows():
+                            if absolute_start < 0:
+                                absolute_start = transcript_row["start"]
+                            
+                            absolute_end = transcript_row["end"]
+
+                            if transcript_row["name"] == row["name"]:
+                                merged_reference_sequence += reference_sequence
+                                merged_alternate_sequence += alternate_sequence
+                            
+                            else:
+                                partial_seq = genome.fetch("chr{}".format(entry.chrom), transcript_row["start"] - 1, transcript_row["end"]).upper()
+
+                                merged_reference_sequence += partial_seq
+                                merged_alternate_sequence += partial_seq
+
                         if row["strand"] == "-":
                             # Complement
                             comp = {"A": "T", "T": "A", "C": "G", "G": "C", "N": "N", "_": "_"}
-                            rev_comp_reference_sequence = "".join([comp[n] for n in reference_sequence.upper()])
+                            rev_comp_reference_sequence = "".join([comp[n] for n in merged_reference_sequence.upper()])
+                            rev_comp_alternate_sequence = "".join([comp[n] for n in merged_alternate_sequence.upper()])
 
                             # Reverse
                             rev_comp_reference_sequence = rev_comp_reference_sequence[::-1]
+                            rev_comp_alternate_sequence = rev_comp_alternate_sequence[::-1]
 
-                            reference_sequence = rev_comp_reference_sequence
+                            merged_reference_sequence = rev_comp_reference_sequence
+                            merged_alternate_sequence = rev_comp_alternate_sequence
 
                         bed_entry = {
                             "chromosome": row["chromosome"],
-                            "start": row["start"],
-                            "end": row["end"],
+                            "start": absolute_start,
+                            "end": absolute_end,
                             "strand": row["strand"],
-                            "name": row["name"]
+                            "gene_symbol": row["name"].split("__")[1],  # To use with the selection_with_protein_coding_genes.bed file
+                            "transcript_id": row["name"].split("__")[0],  # Take track of the transcript ID
                         }
-
-                        # To use with the selection_with_protein_coding_genes.bed file
-                        bed_entry["name"] = row["name"].split("__")[1]
 
                         jobs.append(
                             pool.apply_async(
                                 process_vcf_entry_partial,
                                 args=(
                                     entry.id,
-                                    reference_sequence,
-                                    alternate_sequence,
+                                    merged_reference_sequence,
+                                    merged_alternate_sequence,
                                     bed_entry,
                                     {"chrom": entry.chrom, "pos": entry.pos}
                                 ),
