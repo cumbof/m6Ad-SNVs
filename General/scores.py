@@ -1,7 +1,7 @@
 import os
 import re
 
-tablepath = "./targets-ClinVar-m6A-20230720/targets.tsv"
+tablepath = "./targets-ClinVar-m6A-gencode-20230724/targets.tsv"
 
 headerline = [
     "Free DRA sites (reference)",
