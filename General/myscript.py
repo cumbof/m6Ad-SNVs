@@ -24,7 +24,6 @@ from functools import partial
 import pandas as pd
 import pysam
 from Bio import Seq
-from Bio.Data import CodonTable
 
 # Tool name
 TOOL_ID = "myscript"
@@ -801,9 +800,6 @@ def process_vcf_entry(
                 reference_snp_positions = list()
                 alternate_snp_positions = list()
 
-                # Check if synonymous or non-synonymous
-                synonymous = "yes" if str(Seq.Seq(reference_no_missing_bases).translate()) == str(Seq.Seq(alternate_no_missing_bases).translate()) else "no"
-
                 if len(reference_no_missing_bases) == len(alternate_no_missing_bases):
                     for pos in range(len(reference_no_missing_bases)):
                         if reference_no_missing_bases[pos].lower() != alternate_no_missing_bases[pos].lower():
@@ -848,7 +844,7 @@ def process_vcf_entry(
                     ",".join([str(pos) for pos in alternate_pattern_positions]),
                     structure_state,
                     round(abs(reference_min_free_energy) - abs(alternate_min_free_energy), 4),
-                    synonymous,
+                    vcf_entry["synonymous"],
                     "yes" if frameshift else "no",
                     dra_ref_free,
                     dra_alt_free,
@@ -1156,6 +1152,14 @@ def main():
                             "transcript_id": row["name"].split("__")[0],  # Take track of the transcript ID
                         }
 
+                        synonymous = False
+
+                        for val in entry.info.values():
+                            if isinstance(val, tuple):
+                                for tval in val:
+                                    if "synonymous_variant" in tval:
+                                        synonymous = True
+
                         jobs.append(
                             pool.apply_async(
                                 process_vcf_entry_partial,
@@ -1164,7 +1168,11 @@ def main():
                                     merged_reference_sequence,
                                     merged_alternate_sequence,
                                     bed_entry,
-                                    {"chrom": entry.chrom, "pos": entry.pos}
+                                    {
+                                        "chrom": entry.chrom,
+                                        "pos": entry.pos,
+                                        "synonymous": "yes" if synonymous else "no"
+                                    }
                                 ),
                                 callback=progress,
                             )
