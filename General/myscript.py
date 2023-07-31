@@ -6,7 +6,7 @@ Describe your script here
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 
 __version__ = "0.1.0"
-__date__ = "Jul 7, 2023"
+__date__ = "Jul 30, 2023"
 
 import argparse as ap
 import copy
@@ -24,6 +24,7 @@ from functools import partial
 import pandas as pd
 import pysam
 from Bio import Seq
+from Bio.Data import CodonTable
 
 # Tool name
 TOOL_ID = "myscript"
@@ -66,6 +67,18 @@ TABLE_COLS = [
     "delta_g",
     "synonymous",  # In case of single-nucleotide variations
     "frameshift",  # In case of indels
+    "reference_free_dra_sites",
+    "alternate_free_dra_sites",
+    "reference_free_rac_sites",
+    "alternate_free_rac_sites",
+    "reference_free_ach_sites",
+    "alternate_free_ach_sites",
+    "reference_free_drac_sites",
+    "alternate_free_drac_sites",
+    "reference_free_rach_sites",
+    "alternate_free_rach_sites",
+    "reference_free_drach_sites",
+    "alternate_free_drach_sites"
 ]
 
 
@@ -93,7 +106,7 @@ def read_params(argv):
     p.add_argument(
         "--bed-skip-lines",
         type=int,
-        default=1,
+        default=0,
         dest="bed_skip_lines",
         help="Skip the first number of lines in the input BED file",
     )
@@ -168,6 +181,118 @@ def regex_is_valid(regex: str) -> bool:
 
     except re.error:
         return False
+
+
+def count_free_sites(reference_sequence, reference_structure, alternate_sequence, alternate_structure):
+    regex = re.compile("[AGT][AG]AC[ACT]")
+
+    drach_ref_free = 0
+
+    rach_ref_free = 0
+    drac_ref_free = 0
+
+    ach_ref_free = 0
+    rac_ref_free = 0
+    dra_ref_free = 0
+
+    for match_ref in regex.finditer(reference_sequence):
+        # DRACH
+        drach_ref_structure = reference_structure[match_ref.start():match_ref.start() + 5]
+        if drach_ref_structure == ".....":
+            drach_ref_free += 1
+        
+        else:
+            check_dra = True
+            check_rac = True
+            check_ach = True
+
+            # DRAC
+            drac_ref_structure = reference_structure[match_ref.start():match_ref.start() + 4]
+            # RACH
+            rach_ref_structure = reference_structure[match_ref.start() + 1:match_ref.start() + 5]
+
+            if drac_ref_structure == "....":
+                drac_ref_free += 1
+                check_dra = False
+                check_rac = False
+            
+            elif rach_ref_structure == "....":
+                rach_ref_free += 1
+                check_rac = False
+                check_ach = False
+
+            if check_dra:
+                # DRA
+                dra_ref_structure = reference_structure[match_ref.start():match_ref.start() + 3]
+                if dra_ref_structure == "...":
+                    dra_ref_free += 1
+            
+            if check_rac:
+                # RAC
+                rac_ref_structure = reference_structure[match_ref.start() + 1:match_ref.start() + 4]
+                if rac_ref_structure == "...":
+                    rac_ref_free += 1
+
+            if check_ach:
+                # ACH
+                ach_ref_structure = reference_structure[match_ref.start() + 2:match_ref.start() + 5]
+                if ach_ref_structure == "...":
+                    ach_ref_free += 1
+    
+    drach_alt_free = 0
+
+    rach_alt_free = 0
+    drac_alt_free = 0
+
+    ach_alt_free = 0
+    rac_alt_free = 0
+    dra_alt_free = 0
+
+    for match_alt in regex.finditer(alternate_sequence):
+        # DRACH
+        drach_alt_structure = alternate_structure[match_alt.start():match_alt.start() + 5]
+        if drach_alt_structure == ".....":
+            drach_alt_free += 1
+        
+        else:
+            check_dra = True
+            check_rac = True
+            check_ach = True
+
+            # DRAC
+            drac_alt_structure = alternate_structure[match_alt.start():match_alt.start() + 4]
+            # RACH
+            rach_alt_structure = alternate_structure[match_alt.start() + 1:match_alt.start() + 5]
+
+            if drac_alt_structure == "....":
+                drac_alt_free += 1
+                check_dra = False
+                check_rac = False
+            
+            elif rach_alt_structure == "....":
+                rach_alt_free += 1
+                check_rac = False
+                check_ach = False
+
+            if check_dra:
+                # DRA
+                dra_alt_structure = alternate_structure[match_alt.start():match_alt.start() + 3]
+                if dra_alt_structure == "...":
+                    dra_alt_free += 1
+            
+            if check_rac:
+                # RAC
+                rac_alt_structure = alternate_structure[match_alt.start() + 1:match_alt.start() + 4]
+                if rac_alt_structure == "...":
+                    rac_alt_free += 1
+
+            if check_ach:
+                # ACH
+                ach_alt_structure = alternate_structure[match_alt.start() + 2:match_alt.start() + 5]
+                if ach_alt_structure == "...":
+                    ach_alt_free += 1
+
+    return dra_ref_free, dra_alt_free, rac_ref_free, rac_alt_free, ach_ref_free, ach_alt_free, drac_ref_free, drac_alt_free, rach_ref_free, rach_alt_free, drach_ref_free, drach_alt_free
 
 
 def forna_index(init=False, header=None, row=None, close=False, filepath=None):
@@ -245,7 +370,7 @@ def forna_index(init=False, header=None, row=None, close=False, filepath=None):
         row = copy.deepcopy(row)
 
         # Entry ID is always in the first position
-        row[0] = '<a href="data/{entry_id}.html" target="_blank">{entry_id}</a>'.format(entry_id=row[0])
+        row[0] = '<a href="data/{entry_id}_{transcript_id}.html" target="_blank">{entry_id}</a>'.format(entry_id=row[0], transcript_id=row[6])
 
         text += "<tr>{}</tr>".format("".join(["<td>{}</td>".format(row[pos]) for pos in range(0, len(row)) if pos not in remove_positions]))
 
@@ -311,7 +436,7 @@ def forna_template() -> str:
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>RNAPlot - {entry_id}</title>
+        <title>RNAPlot - {entry_id} - {transcript_id}</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
@@ -336,11 +461,17 @@ def forna_template() -> str:
     </head>
     <body>
         <div class="container">
-            <h2>Target ID: {entry_id}</h2>
+            <h2>Target ID: {entry_id}_{transcript_id}</h2>
 
             <div>
                 <a href="https://www.ncbi.nlm.nih.gov/clinvar/variation/{entry_id}/" target="_blank">
                     https://www.ncbi.nlm.nih.gov/clinvar/variation/{entry_id}/
+                </a>
+            </div>
+
+            <div>
+                <a href="https://www.ncbi.nlm.nih.gov/nuccore/{transcript_id}" target="_blank">
+                    https://www.ncbi.nlm.nih.gov/nuccore/{transcript_id}
                 </a>
             </div>
 
@@ -671,16 +802,13 @@ def process_vcf_entry(
                 alternate_snp_positions = list()
 
                 # Check if synonymous or non-synonymous
-                synonymous = "no"
+                synonymous = "yes" if str(Seq.Seq(reference_no_missing_bases).translate()) == str(Seq.Seq(alternate_no_missing_bases).translate()) else "no"
 
                 if len(reference_no_missing_bases) == len(alternate_no_missing_bases):
                     for pos in range(len(reference_no_missing_bases)):
                         if reference_no_missing_bases[pos].lower() != alternate_no_missing_bases[pos].lower():
                             reference_snp_positions.append(pos + 1)
                             alternate_snp_positions.append(pos + 1)
-
-                    # Check in case of single-nucleotide variation only
-                    synonymous = "yes" if str(Seq.Seq(reference_no_missing_bases)) == str(Seq.Seq(alternate_no_missing_bases)) else "no"
 
                 elif len(reference_no_missing_bases) > len(alternate_no_missing_bases):
                     missing_bases = alternate_sequence.count("_")
@@ -695,6 +823,8 @@ def process_vcf_entry(
                     alternate_snp_positions.extend([pos for pos in range(first_missing_base_pos, first_missing_base_pos + missing_bases + 1)])
 
                     reference_snp_positions.append(first_missing_base_pos)
+
+                dra_ref_free, dra_alt_free, rac_ref_free, rac_alt_free, ach_ref_free, ach_alt_free, drac_ref_free, drac_alt_free, rach_ref_free, rach_alt_free, drach_ref_free, drach_alt_free = count_free_sites(reference_no_missing_bases, reference_structure, alternate_no_missing_bases, alternate_structure)
 
                 # Define the row for the output table
                 out_table_row = [
@@ -719,13 +849,25 @@ def process_vcf_entry(
                     structure_state,
                     round(abs(reference_min_free_energy) - abs(alternate_min_free_energy), 4),
                     synonymous,
-                    "yes" if frameshift else "no"
+                    "yes" if frameshift else "no",
+                    dra_ref_free,
+                    dra_alt_free,
+                    rac_ref_free,
+                    rac_alt_free,
+                    ach_ref_free,
+                    ach_alt_free,
+                    drac_ref_free,
+                    drac_alt_free,
+                    rach_ref_free,
+                    rach_alt_free,
+                    drach_ref_free,
+                    drach_alt_free,
                 ]
 
                 if out_data_folder:
                     # Build the current VCF entry html page
                     # Also define the row for the output index table
-                    forna_filepath = os.path.join(out_data_folder, "{}.html".format(vcf_entry_id))
+                    forna_filepath = os.path.join(out_data_folder, "{}_{}.html".format(vcf_entry_id, bed_entry["transcript_id"]))
 
                     with open(forna_filepath, "w+") as forna_file:
                         # Define pattern sites colors in the reference sequence
@@ -748,6 +890,7 @@ def process_vcf_entry(
                         forna_file.write(
                             forna_template().format(
                                 entry_id=vcf_entry_id,
+                                transcript_id=bed_entry["transcript_id"],
                                 original_reference_sequence=reference_sequence,
                                 reference_sequence=reference_no_missing_bases,
                                 reference_base="".join([reference_no_missing_bases[pos - 1] for pos in reference_snp_positions]),
@@ -839,8 +982,6 @@ def main():
 
     out_index_rows = list()
 
-    processed = set()
-
     # Run prediction on folds in parallel
     with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm() as pbar:
         # Wrapper around the update function of tqdm
@@ -890,7 +1031,10 @@ def main():
                         # Within pysam, coordinates are 0-based half-open intervals
                         # i.e., the first base of the reference sequence is numbered zero;
                         # and the base at position start is part of the interval, but the base at end is not.
-                        reference_sequence = genome.fetch("chr{}".format(entry.chrom), region_start - 1, region_end).upper()
+                        reference_sequence = genome.fetch("chr{}".format(entry.chrom), region_start - 1, region_end - 1).upper()
+
+                        if len(reference_sequence) != (region_end - region_start):
+                            raise Exception("Something went wrong while retrieving the reference sequence from the input genome")
 
                         # Check whether the REF base in the VCF entry actually matches with the base in the reference sequence under that specific position
                         if ref != "." and reference_sequence[entry.pos - region_start:entry.pos - region_start + len(ref)] != ref:
@@ -985,7 +1129,7 @@ def main():
                                 merged_alternate_sequence += alternate_sequence
                             
                             else:
-                                partial_seq = genome.fetch("chr{}".format(entry.chrom), transcript_row["start"] - 1, transcript_row["end"]).upper()
+                                partial_seq = genome.fetch("chr{}".format(entry.chrom), transcript_row["start"] - 1, transcript_row["end"] - 1).upper()
 
                                 merged_reference_sequence += partial_seq
                                 merged_alternate_sequence += partial_seq
@@ -1032,14 +1176,11 @@ def main():
         for job in jobs:
             entry_id, partial_out_table_row, partial_out_index_row = job.get()
 
-            if entry_id not in processed:
-                if partial_out_table_row:
-                    out_table_rows.append(partial_out_table_row)
+            if partial_out_table_row:
+                out_table_rows.append(partial_out_table_row)
 
-                if partial_out_index_row:
-                    out_index_rows.append(partial_out_index_row)
-
-                processed.add(entry_id)
+            if partial_out_index_row:
+                out_index_rows.append(partial_out_index_row)
 
     genome.close()
 
